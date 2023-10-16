@@ -1,0 +1,7 @@
+*.txt
+*.root
+build/*
+install/*
+*.pdf
+*.o
+
