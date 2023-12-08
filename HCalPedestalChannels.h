@@ -19,7 +19,7 @@ class HCalPedestalChannels : public SubsysReco
 		float peak_pos;
 		int nparams;
 		float chisquare;
-		std::vector<float> params;
+		std::vector<double> params;
 		TF1* template_funct;
 	};
 	struct towerinfo {

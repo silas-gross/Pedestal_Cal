@@ -133,6 +133,7 @@ void HCalPedestalChannels::subtractPeak(std::vector<int>* data, int pedestal, in
 {
 	//subracts peak/waveform from data using a new fit if n_evt<100, template derived if n_evt>100
 	std::pair<float, float> peak=findPeak(data, pedestal);
+	
 } 
 std::pair<float,float> HCalPedestalChannels::findPeak(std::vector<int>* data, int pedestal)
 {
@@ -246,13 +247,20 @@ void HCalPedestalChannels::findaFit(function_template* T, std::vector<int> chl_d
 			std::string chldn (i);
 			chldn+="_funct";
 			TF1* fc=new TF1(chldn.c_str(), child_strings.at(i).c_str(), 0, chl_data->size();
+			fc->FixParameter("pedestal", pedestal);
 			TFitResultPtr rfc=ch->Fit(fc, "S");
 			if(rc->chi2/fparams <= 1 || rc->chi2/fparams > cn) continue;
 			else children_queue[rc->chi2/fparams]=fc; 
 		}
 		good_one=*(children_queue.begin());
 	} //A* search built, inserts increasing number of polynomial terms after each one 
-	
+	T->template_funct=good_one.second;
+	T->nparams=good_one.second->GetFormula()->GetNpar();	
+	T->chisquare=good_one.first*T->nparams;
+	T->peak_pos=pos;
+	T->template_funct->FixParameter("pedestal", pedestal);
+	TFitResultPtr rf1=ch->Fit(T->template_funct, "S");
+	T->params=rf1->Parameters();
 }
 float HCalPedestalChannels::FindWaveForm(std::vector <int> *chl_data, float pos, float peak, int channel, int pedestal)
 {
