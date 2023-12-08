@@ -204,9 +204,9 @@ void HCalPedestalChannels::findaFit(function_template* T, std::vector<int> chl_d
 {
 	//This is the A* search 
 	//base level, this uses dual exponential to accound tof the rising/falling nature and then adds polynomial corrections as the higher order terms
-	TF1* f=new TF1("f", "[0]*exp(x*[1])+[2]*exp(-x*[3])+[pedestal]", 0, chl_data->size());
+	TF1* f=new TF1("f", "[0]*exp([1]*x)+[2]*exp(-[3]*x)+[pedestal]", 0, chl_data->size());
 	f->FixParameter("pedestal", pedestal);
-	TF1* f_gaus=new TF1("f_gaus", "[0]*exp(x*[1])+[2]*exp(-x*[1])+[3]*exp(-x*x*[4])+[pedestal]", 0, chl_data->size());
+	TF1* f_gaus=new TF1("f_gaus", "[0]*exp([1]*x)+[2]*exp(-[1]*x)+[3]*exp(-[4]*x*x)+[pedestal]", 0, chl_data->size());
 	f_gaus->FixParameter("pedestal", pedestal);
 	TH1F* ch=new TH1F("channel", "temp", chl_data.size(), -0.5, chl_data.size()+0.5);
 	for(auto c:chl_data) ch->Fill(c);
@@ -225,15 +225,34 @@ void HCalPedestalChannels::findaFit(function_template* T, std::vector<int> chl_d
 		}
 		else{
 			good_one=std::make_pair(parent->first, parent->second);
+			cildren_queue.erase(cn);
 		}
 		TFormula* f1=parent->second->GetFormula();
 		int fparams=f1->GetNpar();
-		fparam+=-4;
-		std::stringstream formula_string (f1->GetExpFormula());
+		fparams++;
+		std::string formula_string (f1->GetExpFormula());
 		std::string substrs;
+		size_t pos =0;
+		if(fparams+1 > chl_data->size()/2) break;
 		std::vector<std::string> child_strings;
-		
-	}
+		while((pos=formula_string.find("x)")!= std::string::npos){
+			std::string paramnumb (fparams);
+			substrs="*(1+[paranumb]*x)";
+			formula_string.insert(pos, substrs);
+			child_strings.push_back(formula_string);
+		}
+		for(int i=0; i<child_strings.size(); i++)
+		{
+			std::string chldn (i);
+			chldn+="_funct";
+			TF1* fc=new TF1(chldn.c_str(), child_strings.at(i).c_str(), 0, chl_data->size();
+			TFitResultPtr rfc=ch->Fit(fc, "S");
+			if(rc->chi2/fparams <= 1 || rc->chi2/fparams > cn) continue;
+			else children_queue[rc->chi2/fparams]=fc; 
+		}
+		good_one=*(children_queue.begin());
+	} //A* search built, inserts increasing number of polynomial terms after each one 
+	
 }
 float HCalPedestalChannels::FindWaveForm(std::vector <int> *chl_data, float pos, float peak, int channel, int pedestal)
 {
