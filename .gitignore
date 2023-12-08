@@ -5,4 +5,15 @@ install/*
 *.pdf
 *.o
 *.swp
-
+.deps/*
+.deps
+*m4te*
+test*
+*.in
+Makefile
+install*
+*.sh
+configure
+config.*
+missing/*
+missing
