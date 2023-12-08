@@ -155,9 +155,9 @@ std::pair<float,float> HCalPedestalChannels::findPeak(std::vector<int>* data, in
 		for(int j=i+1; j<data->size(); j++)
 		{
 			float slope=(data->at(j)-data->at(i))/(j-i);
-			if(slope <0) has_neg=true;
+			if(slope < 0) has_neg=true;
 			if(slope > 0) has_pos=true;
-			if(has_neg && has_pos) break;
+			if(has_neg && has_pos) j=data->size()-1;
 		}
 		if(has_pos) crossed_peak=false;
 		else if(crossed_peak && has_neg) sure_of_it=true; //make sure it wasnt a temporary fluctuation issue
@@ -167,8 +167,18 @@ std::pair<float,float> HCalPedestalChannels::findPeak(std::vector<int>* data, in
 			 break;
 		} 
 	}
-	//now I have a better peak value around which to expand, need to now get the aprroximation to the actual peak
-		
+	//have good appriximation to the peak from int values, now do a weighted average to nearest neighbor to find peak position
+	float maxpeakpos, maxpeakval; 
+	int comp=-1;
+	if(data->at(maxpos-1) > data->at(maxpos+1)) comp=maxpos-1; 
+	else if(data->at(maxpos-1) < data->at(maxpos+1)) comp=maxpos+1;
+	else{
+		 maxpeakpos=(float)maxpos;
+		 maxpeakval=(float)maxval;
+	}
+	if(comp!= -1) maxpeakpos=(float)(maxval*maxpos+data->at(comp)*(comp))/(maxval+data->at(comp));
+	if(comp!= -1) maxpeakval=(float)(maxval*maxpos+data->at(comp)*(comp))/(maxpos+comp);
+	return std::make_pair(maxpeakpos, maxpeakval);
 }
 float HCalPedestalChannels::Heuristic(std::vector<int> data, std::vector<int> wf, int npr)
 {
@@ -193,7 +203,7 @@ int HCalPedestalChannels::getPedestal(std::vector<int> chl_data)
 void HCalPedestalChannels::findaFit(function_template* T, std::vector<int> chl_data, float pos, int pedestal)
 {
 	//This is the A* search 
-	//base level, this uses dual exponential to account for the rising/falling nature and then adds polynomial corrections as the higher order terms
+	//base level, this uses dual exponential to accound tof the rising/falling nature and then adds polynomial corrections as the higher order terms
 	TF1* f=new TF1("f", "[0]*exp(x*[1])+[2]*exp(-x*[3])+[pedestal]", 0, chl_data->size());
 	f->FixParameter("pedestal", pedestal);
 	TF1* f_gaus=new TF1("f_gaus", "[0]*exp(x*[1])+[2]*exp(-x*[1])+[3]*exp(-x*x*[4])+[pedestal]", 0, chl_data->size());
