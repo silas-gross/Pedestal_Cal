@@ -6,9 +6,35 @@
 #include <fun4all/SubsysReco.h>
 
 #include <math.h>
+#include <iostream>
 #include <string>
 #include <vector>
 #include <utility>
+#include <omp.h>
+#include <map>
+#include <algorithm>
+
+#include <TMath.h>
+#include <TFormula.h>
+#include <TNtuple.h>
+#include <TH1.h>
+#include <TF1.h>
+#include <TFitResult.h>
+
+#include <fun4all/Fun4AllBase.h>
+#include <fun4all/Fun4AllInputManager.h>
+#include <fun4allraw/Fun4AllPrdfInputManager.h>
+#include <fun4allraw/Fun4AllPrdfInputPoolManager.h>
+#include <fun4all/SubsysReco.h>
+#include <phool/PHCompositeNode.h>
+#include <phool/PHDataNode.h>
+#include <phool/PHNode.h>
+#include <phool/PHNodeIterator.h>
+#include <phool/getClass.h>
+//#include <pmonitor/pmonitor.h>
+#include <Event/Event.h>
+#include <Event/EventTypes.h>
+
 
 class PHCompositeNode;
 
@@ -74,13 +100,17 @@ class HCalPedestalChannels : public SubsysReco
 
  private:
 	int getPedestal(std::vector<int>);
-	std::pair<float, float> getPeak(std::vector<int>*, int);
-	float FindWaveForm(std::vector<int>*, int, int);
+	std::pair<float, float> findPeak(std::vector<int>*, int);
+	float FindWaveForm(std::vector<int>*, float, float, int, int);
 	float Heuristic(std::vector<int>, std::vector<int>, int);
 	void scaleToFit(function_templates*, float, int);
 	std::vector<std::vector<TH1F*>> hs;
 	std::vector<function_templates> templates;
-	std::vector<towerinfo> towers; 
+	std::vector<towerinfo> towers;
+	std::vector<int> packets; 
+	void subtractPeak(std::vector<int>*, int, int);
+	int getWidth(std::vector<int>, float, int);
+	void findaFit(function_templates*, std::vector<int>, float, int);
 };
 
 #endif // HCALPEDESTALCHANNELS_H

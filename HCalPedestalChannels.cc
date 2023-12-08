@@ -67,11 +67,17 @@
 
 #include <phool/PHCompositeNode.h>
 int n_evt;
+R__LOAD_LIBRARY(libfun4all.so);
+R__LOAD_LIBRARY(libfun4allraw.so);
 HCalPedestalChannels::HCalPedestalChannels(const std::string &name):
  SubsysReco(name)
 {
   std::cout << "HCalPedestalChannels::HCalPedestalChannels(const std::string &name) Calling ctor" << std::endl;
-  n_evt++;
+  n_evt=-20;
+  for(int i=1; i<9; i++){
+	packets.push_back(7000+i);
+	packets.push_back(8000+i);
+  }
   
 }
 
@@ -98,28 +104,31 @@ int HCalPedestalChannels::process_event(PHCompositeNode *topNode)
 	std::cout << "Processing Event" <<n_evt << std::endl;
   	Event* e = findNode::getClass<Event>(topNode, "PRDF");
 	for(auto pid:packets){
+		if(n_evt<=0) break;
 		try{
 			e->getPacket(pid);
 		}
-		catch(std::exception* e){ std::cout<<"no packet with number " <<pid <<std::endl;
+		catch(std::exception* e){ std::cout<<"no packet with number " <<pid <<std::endl;}
 		Packet* p=e->getPacket(pid);
 		if(!p) continue;
-	       #pragma opm for private(c, channel_data)
+//	       #pragma opm for private(c, channel_data)
 		for(int c=0; c<p->iValue(0, "CHANNELS"); c++)
 		{
 		 	std::vector<int> channel_data;	
 			 for(auto s=0; s<31; s++)
 			{
-	 			evtval+=p->iValue(s, c);
-				channel_data.push_back(p->iValue(s,c)); 	
+				try{
+					channel_data.push_back(p->iValue(s,c)); 
+				}
+				catch(std::exception& e){continue;}
 			}
 //		std::cout<<"have loaded in the data"<<std::endl;
 			if (channel_data.size()<3) continue;
 			int pedestal=getPedestal(channel_data);
-			subtractPeak(channel_data, pedestal);
-			hs.at(c).at(s)->Fill(channel_data.at(s)); 
+			subtractPeak(&channel_data, pedestal, c);
+			for(int s=0; s< (int) channel_data.size(); s++) hs.at(c).at(s)->Fill(channel_data.at(s)); 
 		}
-		 
+	} 
   	return Fun4AllReturnCodes::EVENT_OK;
 }
 
@@ -133,13 +142,13 @@ void HCalPedestalChannels::subtractPeak(std::vector<int>* data, int pedestal, in
 {
 	//subracts peak/waveform from data using a new fit if n_evt<100, template derived if n_evt>100
 	std::pair<float, float> peak=findPeak(data, pedestal);
-	
+	FindWaveForm(data, peak.first, peak.second, channel, pedestal); 	
 } 
 std::pair<float,float> HCalPedestalChannels::findPeak(std::vector<int>* data, int pedestal)
 {
 	//First find the max sample value
 	int maxval=0, maxpos=0;
-	for(int i=0; i<data->size(); i++)
+	for(int i=0; i<(int) data->size(); i++)
 	{
 		if(data->at(i) > maxval){
 			maxval=data->at(i);
@@ -148,12 +157,12 @@ std::pair<float,float> HCalPedestalChannels::findPeak(std::vector<int>* data, in
 	}
 	//now that I have that, need to figure out the peak value using approximates to the derivative look for change in slopes to restrict the region of intrest
 	bool crossed_peak=false, sure_of_it=false; //look for going from mixed positive and negative to only negative and then verify 
-	for(int i=0; i<data->size()-1; i++)
+	for(int i=0; i<(int) data->size()-1; i++)
 	{
 		if(data->at(i) < pedestal || data->at(i) < 0.25*(maxval+3*pedestal)) continue; // throw out anything too small 
 		if(crossed_peak && sure_of_it) break;
 		bool has_neg=false, has_pos=false;
-		for(int j=i+1; j<data->size(); j++)
+		for(int j=i+1; j<(int) data->size(); j++)
 		{
 			float slope=(data->at(j)-data->at(i))/(j-i);
 			if(slope < 0) has_neg=true;
@@ -186,14 +195,14 @@ float HCalPedestalChannels::Heuristic(std::vector<int> data, std::vector<int> wf
 	//use chi_squared/ndf as a fitting heuristic
 	float chi=0;
 	int ndf=data.size()-npr;
-	for(int i=0; i<data.size(); i++) chi+=pow(data[i]-wf[i],2)/data[i];
+	for(int i=0; i< (int) data.size(); i++) chi+=pow(data[i]-wf[i],2)/data[i];
 	chi=chi/ndf; 
 	return chi;
 }
 int HCalPedestalChannels::getPedestal(std::vector<int> chl_data)
 {
-	int pedetal=0;
-	for(int i=0; i<chl_data.size(); i++)
+	int pedestal=0;
+	for(int i=0; i<(int) chl_data.size(); i++)
 	{
 		if(i<4)	pedestal+=chl_data.at(i);
 	}
@@ -201,21 +210,21 @@ int HCalPedestalChannels::getPedestal(std::vector<int> chl_data)
 	return pedestal;
 	//use the first three sample method as a baseline
 }
-void HCalPedestalChannels::findaFit(function_template* T, std::vector<int> chl_data, float pos, int pedestal)
+void HCalPedestalChannels::findaFit(function_templates* T, std::vector<int> chl_data, float pos, int pedestal)
 {
 	//This is the A* search 
 	//base level, this uses dual exponential to accound tof the rising/falling nature and then adds polynomial corrections as the higher order terms
-	TF1* f=new TF1("f", "[0]*exp([1]*x)+[2]*exp(-[3]*x)+[pedestal]", 0, chl_data->size());
-	f->FixParameter("pedestal", pedestal);
-	TF1* f_gaus=new TF1("f_gaus", "[0]*exp([1]*x)+[2]*exp(-[1]*x)+[3]*exp(-[4]*x*x)+[pedestal]", 0, chl_data->size());
-	f_gaus->FixParameter("pedestal", pedestal);
+	TF1* f=new TF1("f", "[4]*exp([1]*x)+[2]*exp(-[3]*x)+[0]", 0, chl_data.size());
+	f->FixParameter(0, pedestal);
+	TF1* f_gaus=new TF1("f_gaus", "[5]*exp([1]*x)+[2]*exp(-[1]*x)+[3]*exp(-[4]*x*x)+[0]", 0, chl_data.size());
+	f_gaus->FixParameter(0, pedestal);
 	TH1F* ch=new TH1F("channel", "temp", chl_data.size(), -0.5, chl_data.size()+0.5);
 	for(auto c:chl_data) ch->Fill(c);
-	TFitResultPtr r=ch->Fit(f, "S");
-	TFitResultPtr rg=ch->Fit(f_gaus, "S");
-	int n_params=4, n_g_p=5; 
-	std::map<float, TF1*> children_queue {{r->chi2/n_params, f}, {rg->chi2/n_p_g,f_gaus}} ;
-	std::pair<float, TF1*> good_one {r->chi2/n_params, f};
+	TFitResultPtr r=ch->Fit(f, "SB");
+	TFitResultPtr rg=ch->Fit(f_gaus, "SB");
+	int nparams=4, n_g_p=5; 
+	std::map<float, TF1*> children_queue {std::make_pair(r->Chi2()/(chl_data.size() - nparams), f), std::make_pair(rg->Chi2()/(chl_data.size() - n_g_p),f_gaus)} ;
+	std::pair<float, TF1*> good_one =std::make_pair(r->Chi2()/(chl_data.size()-nparams), f);
 	while(children_queue.size() != 0)
 	{
 		auto parent=children_queue.begin();
@@ -226,7 +235,7 @@ void HCalPedestalChannels::findaFit(function_template* T, std::vector<int> chl_d
 		}
 		else{
 			good_one=std::make_pair(parent->first, parent->second);
-			cildren_queue.erase(cn);
+			children_queue.erase(cn);
 		}
 		TFormula* f1=parent->second->GetFormula();
 		int fparams=f1->GetNpar();
@@ -234,23 +243,23 @@ void HCalPedestalChannels::findaFit(function_template* T, std::vector<int> chl_d
 		std::string formula_string (f1->GetExpFormula());
 		std::string substrs;
 		size_t pos =0;
-		if(fparams+1 > chl_data->size()/2) break;
+		if(fparams+1 > (int) chl_data.size()/2) break; //DOF>1/2 data set
 		std::vector<std::string> child_strings;
-		while((pos=formula_string.find("x)")!= std::string::npos){
-			std::string paramnumb (fparams);
+		while((pos=formula_string.find("x)"))!= std::string::npos){
+			std::string paramnumb =std::to_string(fparams);
 			substrs="*(1+[paranumb]*x)";
 			formula_string.insert(pos, substrs);
 			child_strings.push_back(formula_string);
 		}
-		for(int i=0; i<child_strings.size(); i++)
+		for(int i=0; i<(int) child_strings.size(); i++)
 		{
-			std::string chldn (i);
+			std::string chldn= std::to_string(i);
 			chldn+="_funct";
-			TF1* fc=new TF1(chldn.c_str(), child_strings.at(i).c_str(), 0, chl_data->size();
-			fc->FixParameter("pedestal", pedestal);
-			TFitResultPtr rfc=ch->Fit(fc, "S");
-			if(rc->chi2/fparams <= 1 || rc->chi2/fparams > cn) continue;
-			else children_queue[rc->chi2/fparams]=fc; 
+			TF1* fc=new TF1(chldn.c_str(), child_strings.at(i).c_str(), 0, chl_data.size());
+			fc->FixParameter(0, pedestal);
+			TFitResultPtr rfc=ch->Fit(fc, "SB");
+			if(rfc->Chi2()/fparams <= 1 || rfc->Chi2()/fparams > cn) continue;
+			else children_queue[rfc->Chi2()/(chl_data.size()-fparams)]=fc; 
 		}
 		good_one=*(children_queue.begin());
 	} //A* search built, inserts increasing number of polynomial terms after each one 
@@ -258,45 +267,60 @@ void HCalPedestalChannels::findaFit(function_template* T, std::vector<int> chl_d
 	T->nparams=good_one.second->GetFormula()->GetNpar();	
 	T->chisquare=good_one.first*T->nparams;
 	T->peak_pos=pos;
-	T->template_funct->FixParameter("pedestal", pedestal);
-	TFitResultPtr rf1=ch->Fit(T->template_funct, "S");
+	T->template_funct->FixParameter(0, pedestal);
+	TFitResultPtr rf1=ch->Fit(T->template_funct, "SB");
 	T->params=rf1->Parameters();
 }
 float HCalPedestalChannels::FindWaveForm(std::vector <int> *chl_data, float pos, float peak, int channel, int pedestal)
 {
 	//Actually does the waveform finding, will either apply the template to the data or will create the template
+	function_templates* T1=new function_templates;
 	if(n_evt<20)
 	{
-		function_template* T=new function_template;
-		findaFit(T, *chl_data, pos, pedestal)
+		function_templates* T=new function_templates;
+		findaFit(T, *chl_data, pos, pedestal);
 		//do the A* search over all polynomial fit approaches+ landau
 		if(n_evt==1) templates.push_back(*T);
 		else{
-			function_template* T_old=&templates.at(channel);
+			function_templates* T_old=&templates.at(channel);
 			T_old->peak_pos=1/n_evt*((n_evt-1) * T_old->peak_pos + T->peak_pos);
-			if(T_old->n_params < T->n_params) T_old->function=T->fun ction;
-			T_old->n_params=std::max(T_old->n_params, T->n_params);
-			T_old->chi=1/n_evt*((n_evt-1) * T_old->chi + T->chi);
-			for(int i=0; i<T->params.size(); i++)
+			if(T_old->nparams < T->nparams) T_old->template_funct=T->template_funct;
+			T_old->nparams=std::max(T_old->nparams, T->nparams);
+			T_old->chisquare=1/n_evt*((n_evt-1) * T_old->chisquare + T->chisquare);
+			for(int i=0; i<(int) T->params.size(); i++)
 			{
-				if(i< T_old->params.size()) T_old->params.at(i)=1/n_evt*((n_evt-1) * T_old->params.at(i) + T->params.at(i));
+				if(i< (int)T_old->params.size()) T_old->params.at(i)=1/n_evt*((n_evt-1) * T_old->params.at(i) + T->params.at(i));
 				else T_old->params.push_back(T->params.at(i));
 			}
 			
 		}
 	}
 	else{
-		function_template T=templates.at(channel);
-		T.peak_pos=pos;
-		scaleToFit(&T, peak, getWidth(chl_data, peak));
-	}
+		function_templates* T = &templates.at(channel);
+		T->peak_pos=pos;
+		scaleToFit(T, peak, getWidth(*chl_data, peak, pedestal));
 	
+	}
+	T1=&templates.at(channel);
+	TF1* f=(TF1*)T1->template_funct->Clone();
+	for(int i=0; i<f->GetNpar(); i++)
+	{
+		f->SetParameter(i, T1->params.at(i));
+	}
+	std::vector<int> evaled;
+	for(int i=0; i < (int) chl_data->size(); i++)
+	{
+		evaled.push_back(f->Eval(i));
+	}
+	float hr= Heuristic(*chl_data, evaled, f->GetNpar());  
+	for(int i=0; i<(int) chl_data->size(); i++) chl_data->at(i)+=-evaled.at(i);
+	return hr;
 }
-int getWidth(std::vector<int> chl_data, float peak)
+int HCalPedestalChannels::getWidth(std::vector<int> chl_data, float peak, int pedestal)
 { 
 	int diff=peak-pedestal;
-	int low=1000, high=0;
-	for(int i=0; i<chl_data.size(); i++)
+	int low=10000, high=0;
+	for(int i=0; i< (int) chl_data.size(); i++)
 	{
 		if(chl_data.at(i) > pedestal+0.46*diff && chl_data.at(i) < pedestal+0.56*diff){
 			if( i < low) low=i;
@@ -306,13 +330,24 @@ int getWidth(std::vector<int> chl_data, float peak)
 	int width=high-low;
 	return width;
 }
-void scaleToFit(function_template* T,float peak, int width)
+
+void HCalPedestalChannels::scaleToFit(function_templates* T, float peak, int width)
 {
-	int n_params=T->n_params;
-	std::vector<float> prs=T->params; 
-	TF1* f=T->function;
-		
+	int nparams=T->nparams;
+	std::vector<double> prs=T->params; 
+	TF1* f=(TF1*)T->template_funct->Clone();
+	for(int i=0; i< f->GetNpar(); i++) f->SetParameter(i, prs.at(i));
+	float max=f->GetMaximum();
+	float ratio=peak/max;
+	float integral=f->Integral(0, 2*width);
+	float avg=f->Mean(0, 2*width);
+	float wide=integral/avg;
+	float rat2=2 * (float)width/wide;
+	ratio=(ratio+rat2)/2;
+	for(int i=0; i<nparams-1; i++) T->params.at(i)=prs.at(i)*ratio; //this may do the thing?, Scale up to hit the peak and over to fit. Really could also just hit the data with a fit which is proablb better but way slowwer
+
 }
+
 //____________________________________________________________________________..
 int HCalPedestalChannels::EndRun(const int runnumber)
 {
