@@ -72,13 +72,51 @@ R__LOAD_LIBRARY(libfun4allraw.so);
 HCalPedestalChannels::HCalPedestalChannels(const std::string &name):
  SubsysReco(name)
 {
+  gInterpreter->GenerateDictionary("towerinfo; std::vector<towerinfo>", "HCalPedestalChannels.h");
+  gInterpreter->GenerateDictionary("function_templates; std::vector<funtion_templates>; std::vector<function_templates*>", "HCalPedestalChannels.h");
+  gInterpreter->GenerateDictionary("std::map<int, std::vector<function_templates*>>", "HCalPedestalChannels.h");
   std::cout << "HCalPedestalChannels::HCalPedestalChannels(const std::string &name) Calling ctor" << std::endl;
   n_evt=-20;
+  tr=new TTree("Tower_Templates", "Function Templates for each tower corresponding to the training data");
   for(int i=1; i<9; i++){
 	packets.push_back(7000+i);
 	packets.push_back(8000+i);
   }
-  
+  for(auto p:packets){
+  	for (int i=0; i<192; i++){
+		towerinfo t;
+		t.packet=p;
+		t.packet_channel=i;
+		if(p/1000 == 7) t.inner_outer=false;
+		else if (p/1000 == 8 ) t.inner_outer=true;
+		int po=p%1000; 
+		int cable=i/12;
+		po=po-1;
+		t.sector=4*po+cable%4;
+		if(i<96) t.north_south=true;
+		else t.north_south=false;
+		if(cable < 4) t.channel=i%16;
+		else if( cable > 7) t.channel=8+i%16;
+		else t.channel=(1-(i%16)/8)*8+(i%16);
+		if(t.north_south) t.etabin = t.channel/2;
+		else t.etabin=t.channel/2+12;
+		t.phibin=t.channel%2 + 2*t.sector; 
+		t.eta=-1.1+t.etabin*1.1/12;
+		t.phi=t.phibin*(3.14159/32);
+		if(t.inner_outer) t.label="OHCAL_";
+		else t.label="IHCAL_";
+		if(t.north_south) t.label+="SOUTH_";
+		else t.label+="NORTH_";
+  		t.label+="sector_"+std::to_string(t.sector)+"_channel_"+std::to_string(t.channel);
+		t.id=10000*(1+t.packet/8000)+1000*((t.packet-1)%8)+i;
+		towers.push_back(t);
+		}
+	}
+	std::vector<function_templates> ft;
+  	for (auto t:towers) template_tower_map[t.id]=ft;
+	tr->Branch("Tower", "std::vector<towerinfo>", &towers);
+	tr->Branch("Tower_template", "std::map<int, std::vector<function_templates*>>", &template_tower_map);
+	tr->Fill();
 }
 
 HCalPedestalChannels::~HCalPedestalChannels()
@@ -103,7 +141,9 @@ int HCalPedestalChannels::process_event(PHCompositeNode *topNode)
 	n_evt++;
 	std::cout << "Processing Event" <<n_evt << std::endl;
   	Event* e = findNode::getClass<Event>(topNode, "PRDF");
+	std::cout<<"Found the event"<<std::endl;
 	for(auto pid:packets){
+		std::cout<<pid<<std::endl;
 		if(n_evt<=0) break;
 		try{
 			e->getPacket(pid);
@@ -115,34 +155,37 @@ int HCalPedestalChannels::process_event(PHCompositeNode *topNode)
 		for(int c=0; c<p->iValue(0, "CHANNELS"); c++)
 		{
 		 	std::vector<int> channel_data;	
-			 for(auto s=0; s<31; s++)
+			 for(auto s=0; s<p->iValue(0, "SAMPLES"); s++)
 			{
 				try{
 					channel_data.push_back(p->iValue(s,c)); 
 				}
 				catch(std::exception& e){continue;}
 			}
-//		std::cout<<"have loaded in the data"<<std::endl;
+		std::cout<<"have loaded in the data"<<std::endl;
 			if (channel_data.size()<3) continue;
 			int pedestal=getPedestal(channel_data);
-			subtractPeak(&channel_data, pedestal, c);
+			int tower=10000*(1+pid/8000)+1000*((pid-1)%8)+c;
+			subtractPeak(&channel_data, pedestal, tower);
 			for(int s=0; s< (int) channel_data.size(); s++) hs.at(c).at(s)->Fill(channel_data.at(s)); 
 		}
 	} 
+	tr->Fill();
   	return Fun4AllReturnCodes::EVENT_OK;
 }
 
 //____________________________________________________________________________..
 int HCalPedestalChannels::ResetEvent(PHCompositeNode *topNode)
 {
-  std::cout << "HCalPedestalChannels::ResetEvent(PHCompositeNode *topNode) Resetting internal structures, prepare for next event" << std::endl;
+//  std::cout << "HCalPedestalChannels::ResetEvent(PHCompositeNode *topNode) Resetting internal structures, prepare for next event" << std::endl;
   return Fun4AllReturnCodes::EVENT_OK;
 }
-void HCalPedestalChannels::subtractPeak(std::vector<int>* data, int pedestal, int channel)
+void HCalPedestalChannels::subtractPeak(std::vector<int>* data, int pedestal, int tower)
 {
 	//subracts peak/waveform from data using a new fit if n_evt<100, template derived if n_evt>100
 	std::pair<float, float> peak=findPeak(data, pedestal);
-	FindWaveForm(data, peak.first, peak.second, channel, pedestal); 	
+	std::cout<<"Found the peak" <<std::endl;
+	FindWaveForm(data, peak.first, peak.second, tower, pedestal); 	
 } 
 std::pair<float,float> HCalPedestalChannels::findPeak(std::vector<int>* data, int pedestal)
 {
@@ -271,18 +314,20 @@ void HCalPedestalChannels::findaFit(function_templates* T, std::vector<int> chl_
 	TFitResultPtr rf1=ch->Fit(T->template_funct, "SB");
 	T->params=rf1->Parameters();
 }
-float HCalPedestalChannels::FindWaveForm(std::vector <int> *chl_data, float pos, float peak, int channel, int pedestal)
+float HCalPedestalChannels::FindWaveForm(std::vector <int> *chl_data, float pos, float peak, int tid, int pedestal)
 {
 	//Actually does the waveform finding, will either apply the template to the data or will create the template
 	function_templates* T1=new function_templates;
+	std::cout<<"Have a function template that I can attached to " <<std::endl;
 	if(n_evt<20)
 	{
 		function_templates* T=new function_templates;
 		findaFit(T, *chl_data, pos, pedestal);
 		//do the A* search over all polynomial fit approaches+ landau
-		if(n_evt==1) templates.push_back(*T);
+		template_tower_map[tid].push_back(*T);
+		if(n_evt==1) templates[tid]=(*T);
 		else{
-			function_templates* T_old=&templates.at(channel);
+			function_templates* T_old=&templates[tid];
 			T_old->peak_pos=1/n_evt*((n_evt-1) * T_old->peak_pos + T->peak_pos);
 			if(T_old->nparams < T->nparams) T_old->template_funct=T->template_funct;
 			T_old->nparams=std::max(T_old->nparams, T->nparams);
@@ -296,12 +341,12 @@ float HCalPedestalChannels::FindWaveForm(std::vector <int> *chl_data, float pos,
 		}
 	}
 	else{
-		function_templates* T = &templates.at(channel);
+		function_templates* T = &templates.at(tid);
 		T->peak_pos=pos;
 		scaleToFit(T, peak, getWidth(*chl_data, peak, pedestal));
 	
 	}
-	T1=&templates.at(channel);
+	T1=&templates.at(tid);
 	TF1* f=(TF1*)T1->template_funct->Clone();
 	for(int i=0; i<f->GetNpar(); i++)
 	{
@@ -359,6 +404,13 @@ int HCalPedestalChannels::EndRun(const int runnumber)
 int HCalPedestalChannels::End(PHCompositeNode *topNode)
 {
   std::cout << "HCalPedestalChannels::End(PHCompositeNode *topNode) This is the End..." << std::endl;
+  TFile* f=new TFile(Form("output/Pedestal_analysis_run_%d.root", run), "RECREATE");
+  for(auto hc:hs)for(auto h:hc) h->Write();
+  tr->Write();
+  f->Write();
+  f->Close();
+ // t->Branch("Tower", &tw, "Inner_outer/O:North_South/O:sector/I:channel/I:packet/I:packet_channel/I:etabin/I:phibin/I:eta/F:phi/F");
+ // t->Branch("Template", &T, "peak_pos/F:nparams/I:chisquare/F:params/D:template_funct"); 
   return Fun4AllReturnCodes::EVENT_OK;
 }
 

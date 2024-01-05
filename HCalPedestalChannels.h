@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 #include <utility>
-#include <omp.h>
+//#include <omp.h>
 #include <map>
 #include <algorithm>
 
@@ -20,6 +20,9 @@
 #include <TH1.h>
 #include <TF1.h>
 #include <TFitResult.h>
+#include <TInterpreter.h>
+#include <TTree.h>
+#include <TFile.h>
 
 #include <fun4all/Fun4AllBase.h>
 #include <fun4all/Fun4AllInputManager.h>
@@ -41,6 +44,7 @@ class PHCompositeNode;
 class HCalPedestalChannels : public SubsysReco
 {
  public:
+	int run=0;
 	struct function_templates{
 		float peak_pos;
 		int nparams;
@@ -54,11 +58,13 @@ class HCalPedestalChannels : public SubsysReco
 		int sector; 	//Sector 0-31
 		int channel;	//Channels 0-23
 		int packet; 	//packet is shared between 4 sectors
+		int packet_channel; //channel number in packet, goes from 0-191
 		int etabin;	//pseudorapidity bin
 		int phibin;	//phi bin
 		float eta;	//psedorapidity value
 		float phi;	//phi value
 		std::string label;	//label for tower to quick parse
+		int id;
 	};
   
   HCalPedestalChannels(const std::string &name = "HCalPedestalChannels");
@@ -105,9 +111,11 @@ class HCalPedestalChannels : public SubsysReco
 	float Heuristic(std::vector<int>, std::vector<int>, int);
 	void scaleToFit(function_templates*, float, int);
 	std::vector<std::vector<TH1F*>> hs;
-	std::vector<function_templates> templates;
+	std::map<int, function_templates> templates;
 	std::vector<towerinfo> towers;
 	std::vector<int> packets; 
+	TTree* tr;
+	std::map<int, std::vector<function_templates>> template_tower_map;
 	void subtractPeak(std::vector<int>*, int, int);
 	int getWidth(std::vector<int>, float, int);
 	void findaFit(function_templates*, std::vector<int>, float, int);
