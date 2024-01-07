@@ -142,19 +142,23 @@ int HCalPedestalChannels::process_event(PHCompositeNode *topNode)
 	std::cout << "Processing Event" <<n_evt << std::endl;
   	Event* e = findNode::getClass<Event>(topNode, "PRDF");
 	std::cout<<"Found the event"<<std::endl;
+	std::cout<<packets.size()<<std::endl;
 	for(auto pid:packets){
 		std::cout<<pid<<std::endl;
 		if(n_evt<=0) break;
 		try{
 			e->getPacket(pid);
 		}
-		catch(std::exception* e){ std::cout<<"no packet with number " <<pid <<std::endl;}
+		catch(std::exception& e){ std::cout<<"no packet with number " <<pid <<std::endl;}
+		std::cout<<"made it " <<std::endl;
 		Packet* p=e->getPacket(pid);
+		std::cout<<"Have found the packet"<<std::endl;
 		if(!p) continue;
 //	       #pragma opm for private(c, channel_data)
 		for(int c=0; c<p->iValue(0, "CHANNELS"); c++)
 		{
 		 	std::vector<int> channel_data;	
+			std::cout<<"have found the channel, maybe the sample?"<<std::endl;
 			 for(auto s=0; s<p->iValue(0, "SAMPLES"); s++)
 			{
 				try{
